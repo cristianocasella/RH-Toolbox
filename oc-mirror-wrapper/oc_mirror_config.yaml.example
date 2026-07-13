@@ -1,0 +1,69 @@
+# oc-mirror Sync Configuration Example
+#
+# Minimal configuration file for oc-mirror automation
+# Default values: parallel_images=10, parallel_layers=10, retry_times=5
+#
+# Usage:
+#   1. Copy this file: cp oc_mirror_config.yaml.example oc_mirror_config.yaml
+#   2. Edit oc_mirror_config.yaml with your paths and registry URLs
+#   3. Run: python3 oc_mirror_sync.py --config oc_mirror_config.yaml
+
+# Path to ImageSetConfiguration YAML file
+imageset_config: "/path/to/your/imageset-config-v2.yaml"
+
+# Local working folder for file-based mirror
+working_folder: "/path/to/your/mirror/working-folder"
+
+# Mirror registries (list of registries to sync to)
+# You can configure any number of registries
+registries:
+  - url: "quay.example.com/ocp"
+    name: "Primary"
+  - url: "quay-dr.example.com/ocp"
+    name: "DR-Site"
+
+# ==============================================================================
+# Optional Settings (uncomment to override defaults)
+# ==============================================================================
+
+# oc-mirror options (default: v2_mode=true)
+# options:
+#   v2_mode: true            # Use oc-mirror v2 mode
+#   parallel_images: 10      # Default: 10 (adjust for network speed)
+#   parallel_layers: 10      # Default: 10 (adjust for network speed)
+#   retry_times: 5           # Default: 5 (increase for unstable networks)
+
+# Logging (defaults: level=INFO, log_file=null)
+# logging:
+#   level: "INFO"            # DEBUG, INFO, WARNING, ERROR
+#   log_file: null           # Path to log file, or null for console only
+
+# ==============================================================================
+# Configuration Examples
+# ==============================================================================
+
+# Alternative configuration example:
+# imageset_config: "/path/to/your/alternative-imageset-config-v2.yaml"
+# working_folder: "/path/to/your/alternative/working-folder"
+
+# Multiple registries example (3+ registries):
+# registries:
+#   - url: "quay.dc1.example.com/ocp"
+#     name: "Datacenter-1"
+#   - url: "quay.dc2.example.com/ocp"
+#     name: "Datacenter-2"
+#   - url: "quay.dr.example.com/ocp"
+#     name: "DR-Site"
+#   - url: "quay.edge.example.com/ocp"
+#     name: "Edge-Location"
+
+# Slower network (reduce parallelism, increase retries):
+# options:
+#   parallel_images: 5
+#   parallel_layers: 5
+#   retry_times: 10
+
+# Fast network (increase parallelism):
+# options:
+#   parallel_images: 20
+#   parallel_layers: 20
