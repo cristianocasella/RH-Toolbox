@@ -1,0 +1,10 @@
+# Development dependencies for code quality and linting
+
+# Code formatter
+black>=24.0.0
+
+# Linter
+pylint>=3.0.0
+
+# YAML parser (required by oc-mirror-wrapper)
+PyYAML>=6.0
