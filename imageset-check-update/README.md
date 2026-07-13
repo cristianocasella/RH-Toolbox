@@ -217,7 +217,7 @@ cp ~/.docker/config.json .docker-config.json
 
 **Problem**: Script hangs or times out
 
-**Solution**: 
+**Solution**:
 - Check network connectivity to registries
 - Verify firewall/proxy settings allow HTTPS to registries
 - Some registries may be slow - the timeout is set to 10 seconds per image

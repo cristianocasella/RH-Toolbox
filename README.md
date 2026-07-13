@@ -13,6 +13,75 @@ Python wrapper for automating multi-stage oc-mirror workflows in disconnected Op
 ### [ImageSet Update Checker](./imageset-check-update/)
 Python utility to check for available updates in OpenShift ImageSetConfiguration files. Queries container registries (Docker Hub, Quay.io, Red Hat registries) to identify newer versions of images, operator catalogs, and platform releases before mirroring.
 
+## Development Setup
+
+### Prerequisites
+
+This project uses [asdf](https://asdf-vm.com/) for version management and [pre-commit](https://pre-commit.com/) for automated code quality checks.
+
+### Quick Start
+
+1. **Install asdf** (if not already installed):
+   ```bash
+   # macOS
+   brew install asdf
+
+   # Linux - follow instructions at https://asdf-vm.com/guide/getting-started.html
+   ```
+
+2. **Install required asdf plugins**:
+   ```bash
+   asdf plugin add python
+   asdf plugin add pre-commit
+   ```
+
+3. **Install tools from `.tool-versions`**:
+   ```bash
+   asdf install
+   ```
+
+4. **Install Python dependencies**:
+   ```bash
+   pip3 install -r requirements-dev.txt
+   ```
+
+5. **Install pre-commit hooks**:
+   ```bash
+   pre-commit install
+   ```
+
+### Code Quality
+
+All Python code must pass the following checks before committing:
+
+- **Black** - Code formatter (88 character line length)
+- **Pylint** - Linter (must achieve 10.00/10 score)
+- **YAML validation** - Syntax checks for YAML files
+- **File hygiene** - Trailing whitespace, end-of-file fixers
+
+These checks run automatically on `git commit` via pre-commit hooks.
+
+#### Manual Testing
+
+```bash
+# Format code
+black .
+
+# Run linter
+pylint $(git ls-files '*.py')
+
+# Run all pre-commit checks manually
+pre-commit run --all-files
+```
+
+### Tool Versions
+
+The project uses `.tool-versions` (asdf) to pin specific versions:
+- **Python**: 3.14.2t
+- **pre-commit**: 4.0.1
+
+This ensures consistent development environments across contributors.
+
 ## Contributing
 
 Contributions are welcome! If you have improvements, bug fixes, or new tools to add:
