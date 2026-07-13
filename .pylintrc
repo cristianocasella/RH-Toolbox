@@ -1,0 +1,7 @@
+[MESSAGES CONTROL]
+disable=C0301,R0903
+
+[DESIGN]
+max-branches=15
+max-locals=25
+max-statements=75
