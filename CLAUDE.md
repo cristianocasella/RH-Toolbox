@@ -174,7 +174,7 @@ black path/to/script.py
    #!/usr/bin/env python3
    """
    Brief description of what the script does.
-   
+
    Usage:
        ./script.py [options]
    """
@@ -186,10 +186,10 @@ black path/to/script.py
    import argparse
    import json
    import sys
-   
+
    # Third-party imports
    import yaml
-   
+
    # Local imports (if any)
    from .module import something
    ```
@@ -197,7 +197,7 @@ black path/to/script.py
 3. **Type Hints**:
    ```python
    from typing import Dict, List, Optional, Tuple
-   
+
    def function(param: str) -> Dict[str, str]:
        """Docstring."""
        return {}
@@ -216,7 +216,7 @@ black path/to/script.py
        operation()
    except (OSError, ValueError) as e:
        logger.error("Operation failed: %s", e)
-   
+
    # Acceptable: Top-level catch-all with comment
    try:
        main()
@@ -229,9 +229,9 @@ black path/to/script.py
 6. **Logging**:
    ```python
    import logging
-   
+
    logger = logging.getLogger(__name__)
-   
+
    # Use lazy % formatting for performance
    logger.info("Processing %s items", count)
    logger.error("Failed to process %s: %s", item, error)
