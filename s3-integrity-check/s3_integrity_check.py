@@ -276,9 +276,7 @@ def resolve_velero_preset(args: argparse.Namespace) -> ConnectionInfo:
     bsl_name = args.bsl_name
 
     if not bsl_name:
-        logger.info(
-            "No --bsl-name specified, looking for default BSL in %s", namespace
-        )
+        logger.info("No --bsl-name specified, looking for default BSL in %s", namespace)
         bsl_name = _find_default_bsl(namespace)
         if not bsl_name:
             logger.error(
@@ -288,9 +286,7 @@ def resolve_velero_preset(args: argparse.Namespace) -> ConnectionInfo:
             )
             sys.exit(1)
 
-    logger.info(
-        "Fetching Velero BSL '%s' from namespace %s", bsl_name, namespace
-    )
+    logger.info("Fetching Velero BSL '%s' from namespace %s", bsl_name, namespace)
 
     raw = run_oc_cmd(
         [
@@ -812,7 +808,9 @@ def validate_arguments(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if args.preset and args.prefix:
-        logger.error("--prefix cannot be used with --preset (prefix is auto-discovered)")
+        logger.error(
+            "--prefix cannot be used with --preset (prefix is auto-discovered)"
+        )
         sys.exit(1)
 
     if not args.preset:
@@ -829,9 +827,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             actual = getattr(args, param, default_val)
             if actual != default_val and args.preset != preset_name:
                 flag = f"--{param.replace('_', '-')}"
-                logger.error(
-                    "%s can only be used with --preset %s", flag, preset_name
-                )
+                logger.error("%s can only be used with --preset %s", flag, preset_name)
                 sys.exit(1)
 
     if args.namespace is not None and not args.preset:
@@ -869,19 +865,14 @@ def _enumerate_objects(
     and key is the full S3 object key to probe.
     """
     if conn.scan_mode == SCAN_MODE_ULID:
-        blocks = list_block_ulids(
-            conn.bucket, conn.endpoint, env, conn.no_verify_ssl
-        )
+        blocks = list_block_ulids(conn.bucket, conn.endpoint, env, conn.no_verify_ssl)
         return [(ulid, f"{ulid}/meta.json") for ulid in blocks]
 
     if conn.scan_mode == SCAN_MODE_PREFIX_GROUPS:
         prefixes = list_sub_prefixes(
             conn.bucket, conn.endpoint, env, conn.no_verify_ssl, conn.prefix
         )
-        return [
-            (p.rstrip("/"), f"{p}{conn.probe_file}")
-            for p in prefixes
-        ]
+        return [(p.rstrip("/"), f"{p}{conn.probe_file}") for p in prefixes]
 
     keys = list_all_objects(
         conn.bucket, conn.endpoint, env, conn.no_verify_ssl, conn.prefix
@@ -968,8 +959,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(1)
-    except SystemExit:
-        raise
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except (SystemExit, Exception) as exc:  # pylint: disable=broad-exception-caught
+        if isinstance(exc, SystemExit):
+            raise
         logger.error("Unexpected error: %s", exc)
         sys.exit(1)
