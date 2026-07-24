@@ -52,6 +52,7 @@ class ConnectionInfo:
         prefix: Optional[str] = None,
         scan_mode: str = SCAN_MODE_ALL,
         probe_file: Optional[str] = None,
+        name: Optional[str] = None,
     ):
         self.access_key = access_key
         self.secret_key = secret_key
@@ -62,6 +63,7 @@ class ConnectionInfo:
         self.prefix = prefix
         self.scan_mode = scan_mode
         self.probe_file = probe_file
+        self.name = name
 
 
 def setup_logging(level: str) -> None:
@@ -139,7 +141,7 @@ def run_aws_cmd(
 # ---------------------------------------------------------------------------
 
 
-def resolve_noobaa_preset(args: argparse.Namespace) -> ConnectionInfo:
+def resolve_noobaa_preset(args: argparse.Namespace) -> List[ConnectionInfo]:
     """Auto-discover S3 credentials, endpoint, and bucket from OpenShift/NooBaa."""
     namespace = args.namespace or PRESET_DEFAULTS["noobaa"]["namespace"]
     logger.info("Fetching NooBaa credentials from namespace %s", namespace)
@@ -231,19 +233,22 @@ def resolve_noobaa_preset(args: argparse.Namespace) -> ConnectionInfo:
         "  -l app.kubernetes.io/component=object-store-gateway"
     )
 
-    return ConnectionInfo(
-        access_key=access_key,
-        secret_key=secret_key,
-        endpoint=endpoint,
-        bucket=bucket,
-        no_verify_ssl=True,
-        cleanup_suffix=cleanup_suffix,
-        scan_mode=SCAN_MODE_ULID,
-    )
+    return [
+        ConnectionInfo(
+            access_key=access_key,
+            secret_key=secret_key,
+            endpoint=endpoint,
+            bucket=bucket,
+            no_verify_ssl=True,
+            cleanup_suffix=cleanup_suffix,
+            scan_mode=SCAN_MODE_ULID,
+            name="noobaa",
+        )
+    ]
 
 
-def _find_default_bsl(namespace: str) -> Optional[str]:
-    """Find the BackupStorageLocation marked as default in the namespace."""
+def _list_bsl_names(namespace: str) -> List[str]:
+    """List all BackupStorageLocation names in the namespace."""
     raw = run_oc_cmd(
         [
             "oc",
@@ -256,36 +261,60 @@ def _find_default_bsl(namespace: str) -> Optional[str]:
         ]
     )
     if not raw:
-        return None
+        return []
 
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return None
+        return []
 
+    return [
+        item["metadata"]["name"]
+        for item in data.get("items", [])
+        if "metadata" in item and "name" in item["metadata"]
+    ]
+
+
+def _list_bsl_summary(namespace: str) -> List[Dict[str, str]]:
+    """List all BSLs with their name, bucket, endpoint, and prefix."""
+    raw = run_oc_cmd(
+        [
+            "oc",
+            "get",
+            "backupstoragelocation",
+            "-n",
+            namespace,
+            "-o",
+            "json",
+        ]
+    )
+    if not raw:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    result = []
     for item in data.get("items", []):
-        if item.get("spec", {}).get("default") is True:
-            return item["metadata"]["name"]
+        spec = item.get("spec", {})
+        config = spec.get("config", {})
+        obj_storage = spec.get("objectStorage", {})
+        name = item.get("metadata", {}).get("name", "unknown")
+        result.append(
+            {
+                "name": name,
+                "bucket": obj_storage.get("bucket", "N/A"),
+                "endpoint": config.get("s3Url", "N/A"),
+                "prefix": obj_storage.get("prefix", ""),
+            }
+        )
+    return result
 
-    return None
 
-
-def resolve_velero_preset(args: argparse.Namespace) -> ConnectionInfo:
-    """Auto-discover S3 credentials, endpoint, and bucket from a Velero BSL."""
-    namespace = args.namespace or PRESET_DEFAULTS["velero"]["namespace"]
-    bsl_name = args.bsl_name
-
-    if not bsl_name:
-        logger.info("No --bsl-name specified, looking for default BSL in %s", namespace)
-        bsl_name = _find_default_bsl(namespace)
-        if not bsl_name:
-            logger.error(
-                "No default BackupStorageLocation found in namespace %s. "
-                "Specify one with --bsl-name",
-                namespace,
-            )
-            sys.exit(1)
-
+def _resolve_bsl(bsl_name: str, namespace: str) -> ConnectionInfo:
+    """Resolve a single BackupStorageLocation into a ConnectionInfo."""
     logger.info("Fetching Velero BSL '%s' from namespace %s", bsl_name, namespace)
 
     raw = run_oc_cmd(
@@ -379,7 +408,54 @@ def resolve_velero_preset(args: argparse.Namespace) -> ConnectionInfo:
         prefix=backup_prefix,
         scan_mode=SCAN_MODE_PREFIX_GROUPS,
         probe_file="velero-backup.json",
+        name=bsl_name,
     )
+
+
+def resolve_velero_preset(args: argparse.Namespace) -> List[ConnectionInfo]:
+    """Auto-discover S3 credentials, endpoint, and bucket from Velero BSLs.
+
+    Without --bsl-name: lists available BSLs and exits (use --all-bsls to scan all).
+    With --bsl-name: scans only the specified BSL.
+    With --all-bsls: scans every BSL in the namespace.
+    """
+    namespace = args.namespace or PRESET_DEFAULTS["velero"]["namespace"]
+    bsl_name = args.bsl_name
+    all_bsls = args.all_bsls
+
+    if bsl_name:
+        return [_resolve_bsl(bsl_name, namespace)]
+
+    bsl_names = _list_bsl_names(namespace)
+    if not bsl_names:
+        logger.error(
+            "No BackupStorageLocations found in namespace %s. "
+            "Is oc logged in with access to this resource?",
+            namespace,
+        )
+        sys.exit(1)
+
+    if all_bsls:
+        logger.info("Scanning all %d BSLs in namespace %s", len(bsl_names), namespace)
+        return [_resolve_bsl(name, namespace) for name in bsl_names]
+
+    summaries = _list_bsl_summary(namespace)
+    print()
+    print("=" * 70)
+    print(f"  Available BSLs in namespace: {namespace}")
+    print("=" * 70)
+    for entry in summaries:
+        prefix_info = f"  prefix={entry['prefix']}" if entry["prefix"] else ""
+        print(f"  - {entry['name']:30s}  bucket={entry['bucket']}{prefix_info}")
+        print(f"    {' ':30s}  endpoint={entry['endpoint']}")
+    print()
+    print("To scan a specific BSL:")
+    print(f"  {sys.argv[0]} --preset velero --bsl-name <NAME>")
+    print()
+    print("To scan all BSLs at once:")
+    print(f"  {sys.argv[0]} --preset velero --all-bsls")
+    print("=" * 70)
+    sys.exit(0)
 
 
 PRESETS = {
@@ -393,6 +469,7 @@ PRESET_ONLY_PARAMS = {
     },
     "velero": {
         "bsl_name": None,
+        "all_bsls": False,
     },
 }
 
@@ -693,8 +770,14 @@ Examples:
   # NooBaa preset (auto-discovers credentials from OpenShift)
   %(prog)s --preset noobaa
 
-  # Velero preset (uses default BSL)
+  # Velero preset: list available BSLs and their buckets
   %(prog)s --preset velero
+
+  # Velero: scan a specific BSL
+  %(prog)s --preset velero --bsl-name default
+
+  # Velero: scan all BSLs at once
+  %(prog)s --preset velero --all-bsls
 
   # Velero with specific BSL and namespace
   %(prog)s --preset velero --bsl-name aap --namespace open-cluster-management-backup
@@ -755,9 +838,13 @@ Examples:
     velero_group.add_argument(
         "--bsl-name",
         help=(
-            "Name of the BackupStorageLocation to use "
-            "(default: the BSL marked as default)"
+            "Name of the BackupStorageLocation to scan " "(omit to list available BSLs)"
         ),
+    )
+    velero_group.add_argument(
+        "--all-bsls",
+        action="store_true",
+        help="Scan all BackupStorageLocations in the namespace",
     )
 
     shared_group = parser.add_argument_group("shared preset options")
@@ -835,20 +922,22 @@ def validate_arguments(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def resolve_connection(args: argparse.Namespace) -> ConnectionInfo:
-    """Build ConnectionInfo from either a preset or explicit arguments."""
+def resolve_connection(args: argparse.Namespace) -> List[ConnectionInfo]:
+    """Build ConnectionInfo list from either a preset or explicit arguments."""
     if args.preset:
         return PRESETS[args.preset](args)
 
-    return ConnectionInfo(
-        access_key=args.access_key,
-        secret_key=args.secret_key,
-        endpoint=args.endpoint,
-        bucket=args.bucket,
-        no_verify_ssl=args.no_verify_ssl,
-        prefix=args.prefix,
-        scan_mode=SCAN_MODE_ALL,
-    )
+    return [
+        ConnectionInfo(
+            access_key=args.access_key,
+            secret_key=args.secret_key,
+            endpoint=args.endpoint,
+            bucket=args.bucket,
+            no_verify_ssl=args.no_verify_ssl,
+            prefix=args.prefix,
+            scan_mode=SCAN_MODE_ALL,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -880,28 +969,12 @@ def _enumerate_objects(
     return [(key, key) for key in keys]
 
 
-def main() -> None:
-    """Main entry point."""
-    args = parse_arguments()
-
-    setup_logging("DEBUG" if args.debug else "INFO")
-    validate_arguments(args)
-
-    conn = resolve_connection(args)
-
-    env = os.environ.copy()
-    env["AWS_ACCESS_KEY_ID"] = conn.access_key
-    env["AWS_SECRET_ACCESS_KEY"] = conn.secret_key
-
-    logger.info("Endpoint: %s", conn.endpoint)
-    logger.info("Bucket:   %s", conn.bucket)
-    if conn.prefix:
-        logger.info("Prefix:   %s", conn.prefix)
-
+def _scan_connection(conn: ConnectionInfo, env: Dict[str, str], dry_run: bool) -> int:
+    """Run integrity check on a single connection. Returns exit code."""
     objects = _enumerate_objects(conn, env)
     if not objects:
         logger.info("No objects found in bucket")
-        sys.exit(0)
+        return 0
 
     logger.info("Found %d objects. Testing each...", len(objects))
 
@@ -941,16 +1014,53 @@ def main() -> None:
             )
             for label, detail in errors:
                 logger.warning("  %s: %s", label, detail)
-        sys.exit(0)
+        return 0
 
     logger.warning("Corrupted objects (%d):", len(corrupted))
     for label in corrupted:
         logger.warning("  - %s", label)
 
-    if not args.dry_run:
+    if not dry_run:
         print_cleanup_commands(corrupted, conn)
 
-    sys.exit(2)
+    return 2
+
+
+def main() -> None:
+    """Main entry point."""
+    args = parse_arguments()
+
+    setup_logging("DEBUG" if args.debug else "INFO")
+    validate_arguments(args)
+
+    connections = resolve_connection(args)
+    multi = len(connections) > 1
+    worst_exit = 0
+
+    for idx, conn in enumerate(connections):
+        env = os.environ.copy()
+        env["AWS_ACCESS_KEY_ID"] = conn.access_key
+        env["AWS_SECRET_ACCESS_KEY"] = conn.secret_key
+
+        if multi:
+            header = conn.name or conn.bucket
+            print()
+            print("=" * 60)
+            print(f"  BSL: {header}  |  Bucket: {conn.bucket}")
+            print("=" * 60)
+
+        logger.info("Endpoint: %s", conn.endpoint)
+        logger.info("Bucket:   %s", conn.bucket)
+        if conn.prefix:
+            logger.info("Prefix:   %s", conn.prefix)
+
+        exit_code = _scan_connection(conn, env, args.dry_run)
+        worst_exit = max(worst_exit, exit_code)
+
+        if multi and idx < len(connections) - 1:
+            print()
+
+    sys.exit(worst_exit)
 
 
 if __name__ == "__main__":

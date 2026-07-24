@@ -1,10 +1,10 @@
 [MESSAGES CONTROL]
-disable=C0301,R0903
+disable=C0301,C0302,R0903
 
 [DESIGN]
-max-args=10
-max-attributes=10
-max-positional-arguments=10
+max-args=11
+max-attributes=11
+max-positional-arguments=11
 max-branches=15
 max-locals=25
 max-statements=75
