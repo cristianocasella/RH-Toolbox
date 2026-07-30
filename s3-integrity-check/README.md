@@ -24,16 +24,16 @@ The tool supports two modes:
 
 ```bash
 # NooBaa preset — scans Thanos TSDB blocks in the observability bucket
-./s3_integrity_check.py --preset noobaa
+python3 s3_integrity_check.py --preset noobaa
 
 # Velero preset — scans all objects in a Velero backup bucket
-./s3_integrity_check.py --preset velero
+python3 s3_integrity_check.py --preset velero
 
 # Velero with a specific BackupStorageLocation
-./s3_integrity_check.py --preset velero --bsl-name aap
+python3 s3_integrity_check.py --preset velero --bsl-name aap
 
 # Generic S3 endpoint
-./s3_integrity_check.py \
+python3 s3_integrity_check.py \
     --endpoint https://s3.example.com \
     --access-key AKIAIOSFODNN7EXAMPLE \
     --secret-key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
@@ -124,26 +124,26 @@ Lists every object in the bucket (optionally filtered by prefix), handling S3 pa
 
 ```bash
 # NooBaa with custom storage namespace
-./s3_integrity_check.py --preset noobaa --namespace my-storage-ns
+python3 s3_integrity_check.py --preset noobaa --namespace my-storage-ns
 
 # NooBaa dry-run (report only)
-./s3_integrity_check.py --preset noobaa --dry-run
+python3 s3_integrity_check.py --preset noobaa --dry-run
 
 # Velero with default BSL
-./s3_integrity_check.py --preset velero
+python3 s3_integrity_check.py --preset velero
 
 # Velero with specific BSL and namespace
-./s3_integrity_check.py --preset velero --bsl-name rhbk \
+python3 s3_integrity_check.py --preset velero --bsl-name rhbk \
     --namespace open-cluster-management-backup
 
 # Generic MinIO endpoint with self-signed cert
-./s3_integrity_check.py \
+python3 s3_integrity_check.py \
     --endpoint https://minio.local:9000 \
     --access-key admin --secret-key secret \
     --bucket data --no-verify-ssl
 
 # Generic endpoint, scan only under a prefix
-./s3_integrity_check.py \
+python3 s3_integrity_check.py \
     --endpoint https://s3.example.com \
     --access-key AKIA... --secret-key ... \
     --bucket my-bucket --prefix backups/2026/

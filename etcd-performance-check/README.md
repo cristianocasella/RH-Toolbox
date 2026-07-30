@@ -27,13 +27,13 @@ The script requires only the Python standard library (no pip dependencies) and u
 
 ```bash
 # Basic run -- uses all defaults
-./etcd_performance_check.py
+python3 etcd_performance_check.py
 
 # Use a wider rate window for smoother percentiles
-./etcd_performance_check.py --rate-interval 10m
+python3 etcd_performance_check.py --rate-interval 10m
 
 # Save the report to a specific path
-./etcd_performance_check.py -o /tmp/etcd-report.md
+python3 etcd_performance_check.py -o /tmp/etcd-report.md
 ```
 
 ## Usage
@@ -111,22 +111,22 @@ usage: etcd_performance_check.py [-h] [-n NAMESPACE] [--monitoring-ns NS]
 
 ```bash
 # Default: openshift-etcd namespace, 5m rate window
-./etcd_performance_check.py
+python3 etcd_performance_check.py
 
 # Custom etcd namespace (e.g. single-node or non-standard deployment)
-./etcd_performance_check.py -n my-etcd-ns
+python3 etcd_performance_check.py -n my-etcd-ns
 
 # Use a different Prometheus pod (e.g. HA pair)
-./etcd_performance_check.py --prom-pod prometheus-k8s-1
+python3 etcd_performance_check.py --prom-pod prometheus-k8s-1
 
 # Fetch more log lines for better compaction statistics
-./etcd_performance_check.py --log-lines 10000
+python3 etcd_performance_check.py --log-lines 10000
 
 # Wider rate window for clusters with low request rates
-./etcd_performance_check.py --rate-interval 15m
+python3 etcd_performance_check.py --rate-interval 15m
 
 # Combine options
-./etcd_performance_check.py --rate-interval 10m --log-lines 5000 -o /tmp/report.md
+python3 etcd_performance_check.py --rate-interval 10m --log-lines 5000 -o /tmp/report.md
 ```
 
 ## Example Output

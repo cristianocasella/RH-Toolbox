@@ -176,11 +176,15 @@ black path/to/script.py
    Brief description of what the script does.
 
    Usage:
-       ./script.py [options]
+       python3 script.py [options]
    """
    ```
 
-2. **Imports Organization**:
+2. **Executable bit**: All scripts must have the executable bit set (`chmod +x script.py`). This ensures both `python3 script.py` and `./script.py` work.
+
+3. **README execution style**: Always use `python3 script.py` (not `./script.py`) in README examples and documentation.
+
+4. **Imports Organization**:
    ```python
    # Standard library imports
    import argparse
@@ -194,7 +198,7 @@ black path/to/script.py
    from .module import something
    ```
 
-3. **Type Hints**:
+5. **Type Hints**:
    ```python
    from typing import Dict, List, Optional, Tuple
 
@@ -203,13 +207,13 @@ black path/to/script.py
        return {}
    ```
 
-4. **File Encoding**:
+6. **File Encoding**:
    ```python
    with open(file_path, 'r', encoding='utf-8') as f:
        content = f.read()
    ```
 
-5. **Exception Handling**:
+7. **Exception Handling**:
    ```python
    # Good: Specific exceptions
    try:
@@ -226,7 +230,7 @@ black path/to/script.py
        sys.exit(1)
    ```
 
-6. **Logging**:
+8. **Logging**:
    ```python
    import logging
 
@@ -310,8 +314,8 @@ The main README should:
 ### Checklist
 
 - [ ] Create tool directory: `tool-name/`
-- [ ] Add main script: `tool-name/script.py`
-- [ ] Add tool README: `tool-name/README.md`
+- [ ] Add main script: `tool-name/script.py` (must have `chmod +x`)
+- [ ] Add tool README: `tool-name/README.md` (use `python3 script.py` style in examples)
 - [ ] Add configuration example (if needed): `tool-name/config.yaml.example`
 - [ ] **Whitelabel all content** (remove customer-specific info)
 - [ ] Add type hints to all functions
@@ -324,6 +328,7 @@ The main README should:
 - [ ] Update main README with tool entry
 - [ ] Test script functionality
 - [ ] Inform user that changes are ready for review (DO NOT commit or push)
+- [ ] **Print a Slack announce message** for the user to copy-paste. Format: `New tool: <Tool Name> — <2-3 sentence description of what the tool does, its key features, and why it's useful>. Check it out on https://github.com/cristianocasella/RH-Toolbox`
 
 ### Script Template
 
@@ -333,7 +338,7 @@ The main README should:
 Brief description of the tool.
 
 Usage:
-    ./script.py [options]
+    python3 script.py [options]
 """
 
 import argparse
