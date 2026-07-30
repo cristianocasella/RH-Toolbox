@@ -13,6 +13,9 @@ Python wrapper for automating multi-stage oc-mirror workflows in disconnected Op
 ### [ImageSet Update Checker](./imageset-check-update/)
 Python utility to check for available updates in OpenShift ImageSetConfiguration files. Queries container registries (Docker Hub, Quay.io, Red Hat registries) to identify newer versions of images, operator catalogs, and platform releases before mirroring.
 
+### [etcd Performance Check](./etcd-performance-check/)
+Python utility to collect and analyze etcd performance metrics on OpenShift clusters. Queries Prometheus for WAL fsync, compaction pause, backend commit durations, and DB fragmentation, then rates each metric against best-practice thresholds and generates a color-coded terminal report plus a markdown file.
+
 ### [S3 Integrity Check](./s3-integrity-check/)
 Python utility to detect corrupted objects in S3-compatible buckets where object metadata exists but underlying data is missing. Supports any S3 endpoint via direct connection parameters, with built-in presets for auto-discovering credentials from known platforms like NooBaa and Velero on OpenShift.
 
