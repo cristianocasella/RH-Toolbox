@@ -60,6 +60,125 @@ THRESHOLDS: Dict[str, List[tuple]] = {
     ],
 }
 
+RECOMMENDATIONS: Dict[str, Dict[str, List[str]]] = {
+    "wal_fsync_ms": {
+        "Warning": [
+            "Consider reviewing disk I/O on control-plane nodes -- "
+            "etcd performs best on low-latency storage (SSD/NVMe).",
+            "Consider running `fio` or `etcd-io/bbolt` benchmarks "
+            "to validate disk performance meets etcd requirements.",
+            "Consider whether other I/O-heavy workloads on "
+            "control-plane nodes may be contributing to latency.",
+        ],
+        "Critical": [
+            "Disk latency is critically high -- etcd may be at risk "
+            "of leader election timeouts and cluster instability.",
+            "Consider verifying control-plane nodes use dedicated "
+            "SSD/NVMe storage for /var/lib/etcd "
+            "(not shared or network-attached).",
+            "Consider running `fio` benchmarks to confirm disk "
+            "performance: `fio --rw=write --ioengine=sync "
+            "--fdatasync=1 --directory=/var/lib/etcd --size=22m "
+            "--bs=2300 --name=etcd-benchmark`.",
+            "If disks are underperforming, consider migrating etcd "
+            "data to faster storage or replacing disks with higher "
+            "IOPS capacity.",
+        ],
+    },
+    "compaction_pause_ms": {
+        "Warning": [
+            "Compaction pauses are elevated -- consider reviewing the "
+            "number of keys in etcd with "
+            "`etcdctl endpoint status --cluster -w table`.",
+            "Consider checking for excessive Kubernetes object counts "
+            "(events, secrets, configmaps) that increase DB size.",
+        ],
+        "Critical": [
+            "Compaction pauses are critically long and may cause "
+            "request latency spikes.",
+            "Consider investigating etcd DB size and key count -- "
+            "large databases take longer to compact.",
+            "Consider scheduling a manual defragmentation during a "
+            "maintenance window with "
+            "`oc rsh -n openshift-etcd <pod> etcdctl defrag --cluster`.",
+        ],
+    },
+    "backend_commit_ms": {
+        "Warning": [
+            "Backend commit latency is elevated -- this can be "
+            "caused by slow disk I/O or a large database.",
+            "Consider checking disk utilization on control-plane "
+            "nodes with `iostat -x 1 5` or via the monitoring console.",
+            "Consider verifying etcd's data directory is on a "
+            "dedicated, low-latency volume.",
+        ],
+        "Critical": [
+            "Backend commits are critically slow -- etcd may drop "
+            "requests or trigger leader elections.",
+            "This is typically a storage performance issue. "
+            "Consider verifying disks meet etcd requirements "
+            "(< 10ms p99 fdatasync latency).",
+            "If DB size is large (> 4 GB), reducing the number of "
+            "Kubernetes objects may also help.",
+        ],
+    },
+    "compaction_time_ms": {
+        "Warning": [
+            "Compaction is taking longer than expected -- this "
+            "typically correlates with DB size and key count.",
+            "Consider checking for Kubernetes object sprawl: "
+            "excessive ClusterServiceVersions (CSVs), events, "
+            "secrets, or CRD instances.",
+            "Consider reviewing DB size and quota usage with "
+            "`oc exec -n openshift-etcd <pod> -c etcd -- "
+            "etcdctl endpoint status --cluster -w table`.",
+        ],
+        "Critical": [
+            "Compaction is critically slow -- the etcd database may be too large.",
+            "Consider identifying top key consumers with "
+            "`oc exec -n openshift-etcd <pod> -c etcd -- "
+            "etcdctl get / --prefix --keys-only | "
+            "sed 's|/[^/]*$||' | sort | uniq -c | sort -rn | "
+            "head -20`.",
+            "Common causes on OpenShift include: (1) OLM operators "
+            "installed in AllNamespaces mode creating a CSV copy per "
+            "namespace -- consider switching to OwnNamespace where "
+            "possible; (2) stale or superseded CSV versions not "
+            "cleaned up; (3) high event volume.",
+            "After reducing object count, consider defragmenting "
+            "etcd to reclaim space with "
+            "`oc rsh -n openshift-etcd <pod> etcdctl defrag --cluster`.",
+        ],
+    },
+    "fragmentation_pct": {
+        "Warning": [
+            "DB fragmentation is elevated -- dead space may be "
+            "accumulating between compactions.",
+            "Consider scheduling a defragmentation during a "
+            "maintenance window with "
+            "`oc rsh -n openshift-etcd <pod> etcdctl defrag --cluster`.",
+            "Note: defrag briefly pauses writes on each member. "
+            "Consider running one member at a time if performing "
+            "manually, or rely on the built-in OpenShift automatic "
+            "defrag (available on OCP 4.9+).",
+        ],
+        "Critical": [
+            "Fragmentation is critically high -- the DB may be using "
+            "significantly more disk than necessary.",
+            "Consider running defragmentation promptly with "
+            "`oc rsh -n openshift-etcd <pod> etcdctl defrag --cluster`.",
+            "If fragmentation returns quickly after defrag, the "
+            "cluster may have high key churn -- consider "
+            "investigating which objects are frequently created "
+            "and deleted.",
+            "Consider checking DB size vs. quota -- if total size "
+            "is approaching the quota (typically 8 GB), "
+            "defragmentation may be necessary to prevent etcd "
+            "from rejecting writes.",
+        ],
+    },
+}
+
 RATING_SYMBOL: Dict[str, str] = {
     "Superb": "\033[32m✅ Superb\033[0m",
     "Good": "\033[32m✅ Good\033[0m",
@@ -330,6 +449,21 @@ def short_node(pod_or_instance: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _worst_rating(ratings: List[str]) -> Optional[str]:
+    """Return the worst rating from a list, or None if empty."""
+    if not ratings:
+        return None
+    return max(ratings, key=RATING_ORDER.index)
+
+
+def _get_recommendations(metric_key: str, worst: Optional[str]) -> List[str]:
+    """Return recommendation strings for a metric at Warning/Critical."""
+    if worst is None or RATING_ORDER.index(worst) < 3:
+        return []
+    level = "Critical" if worst == "Critical" else "Warning"
+    return RECOMMENDATIONS.get(metric_key, {}).get(level, [])
+
+
 def analyze_metrics(
     metrics: Dict[str, List[Dict[str, Any]]],
     compaction_logs: Dict[str, List[Dict[str, Any]]],
@@ -337,29 +471,55 @@ def analyze_metrics(
     """Build display rows and ratings from collected metrics."""
     all_ratings: List[str] = []
 
+    wal_ratings: List[str] = []
     wal_rows = _build_simple_rows(
         metrics.get("wal_fsync", []),
         "wal_fsync_ms",
         1000,
         "<10ms",
-        all_ratings,
+        wal_ratings,
     )
+    all_ratings.extend(wal_ratings)
+
+    cp_ratings: List[str] = []
     cp_rows = _build_simple_rows(
         metrics.get("compaction_pause", []),
         "compaction_pause_ms",
         1,
         "<900ms",
-        all_ratings,
+        cp_ratings,
     )
+    all_ratings.extend(cp_ratings)
+
+    bc_ratings: List[str] = []
     bc_rows = _build_simple_rows(
         metrics.get("backend_commit", []),
         "backend_commit_ms",
         1000,
         "<100ms",
-        all_ratings,
+        bc_ratings,
     )
-    db_rows = _build_db_rows(metrics.get("db_size", []), compaction_logs, all_ratings)
-    comp_rows = _build_compaction_rows(compaction_logs, all_ratings)
+    all_ratings.extend(bc_ratings)
+
+    frag_ratings: List[str] = []
+    db_rows = _build_db_rows(metrics.get("db_size", []), compaction_logs, frag_ratings)
+    all_ratings.extend(frag_ratings)
+
+    comp_ratings: List[str] = []
+    comp_rows = _build_compaction_rows(compaction_logs, comp_ratings)
+    all_ratings.extend(comp_ratings)
+
+    metric_recommendations: Dict[str, List[str]] = {}
+    for key, ratings in [
+        ("wal_fsync_ms", wal_ratings),
+        ("compaction_pause_ms", cp_ratings),
+        ("backend_commit_ms", bc_ratings),
+        ("fragmentation_pct", frag_ratings),
+        ("compaction_time_ms", comp_ratings),
+    ]:
+        recs = _get_recommendations(key, _worst_rating(ratings))
+        if recs:
+            metric_recommendations[key] = recs
 
     return {
         "wal_rows": wal_rows,
@@ -368,6 +528,7 @@ def analyze_metrics(
         "db_rows": db_rows,
         "comp_rows": comp_rows,
         "all_ratings": all_ratings,
+        "recommendations": metric_recommendations,
     }
 
 
@@ -511,6 +672,15 @@ def _fmt_row(cells: list, col_widths: List[int]) -> str:
     return f"│{'│'.join(parts)}│"
 
 
+RECOMMENDATION_TITLES: Dict[str, str] = {
+    "wal_fsync_ms": "WAL Fsync Duration",
+    "compaction_pause_ms": "Compaction Pause Duration",
+    "backend_commit_ms": "Backend Commit Duration",
+    "compaction_time_ms": "Compaction Time",
+    "fragmentation_pct": "DB Fragmentation",
+}
+
+
 def print_summary(worst_rating: str) -> None:
     """Print the overall health verdict."""
     idx = RATING_ORDER.index(worst_rating) if worst_rating in RATING_ORDER else 4
@@ -523,6 +693,22 @@ def print_summary(worst_rating: str) -> None:
     else:
         print(f"{BOLD}Overall: \033[31m❌ CRITICAL ISSUES" f" DETECTED\033[0m{RESET}")
     print()
+
+
+def print_recommendations(recommendations: Dict[str, List[str]]) -> None:
+    """Print actionable recommendations for metrics that need attention."""
+    if not recommendations:
+        return
+    print(f"{BOLD}{'─' * 60}{RESET}")
+    print(f"{BOLD}Recommendations{RESET}")
+    print(f"{BOLD}{'─' * 60}{RESET}")
+    print()
+    for metric_key, items in recommendations.items():
+        title = RECOMMENDATION_TITLES.get(metric_key, metric_key)
+        print(f"  {BOLD}{CYAN}{title}{RESET}")
+        for item in items:
+            print(f"    • {item}")
+        print()
 
 
 def print_terminal_report(
@@ -561,6 +747,7 @@ def print_terminal_report(
     if analysis["all_ratings"]:
         worst_idx = max(RATING_ORDER.index(r) for r in analysis["all_ratings"])
         print_summary(RATING_ORDER[worst_idx])
+        print_recommendations(analysis.get("recommendations", {}))
     else:
         print(f"{BOLD}No metrics collected.{RESET}\n")
 
@@ -600,6 +787,7 @@ def generate_markdown(
     metrics: Dict[str, List[Dict[str, Any]]],
     compaction_logs: Dict[str, List[Dict[str, Any]]],
     all_ratings: List[str],
+    recommendations: Optional[Dict[str, List[str]]] = None,
 ) -> str:
     """Build the full markdown report."""
     lines: List[str] = []
@@ -617,6 +805,7 @@ def generate_markdown(
     _md_db_fragmentation(lines, metrics, compaction_logs)
     _md_compaction_logs(lines, compaction_logs)
     _md_overall(lines, all_ratings)
+    _md_recommendations(lines, recommendations or {})
 
     return "\n".join(lines)
 
@@ -785,6 +974,23 @@ def _md_overall(lines: List[str], all_ratings: List[str]) -> None:
     lines.append("")
 
 
+def _md_recommendations(
+    lines: List[str], recommendations: Dict[str, List[str]]
+) -> None:
+    """Append actionable recommendations to the markdown report."""
+    if not recommendations:
+        return
+    lines.append("## Recommendations")
+    lines.append("")
+    for metric_key, items in recommendations.items():
+        title = RECOMMENDATION_TITLES.get(metric_key, metric_key)
+        lines.append(f"### {title}")
+        lines.append("")
+        for item in items:
+            lines.append(f"- {item}")
+        lines.append("")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -877,7 +1083,12 @@ def main() -> None:
     print_terminal_report(cluster, timestamp, analysis)
 
     md_content = generate_markdown(
-        cluster, timestamp, metrics, compaction_logs, analysis["all_ratings"]
+        cluster,
+        timestamp,
+        metrics,
+        compaction_logs,
+        analysis["all_ratings"],
+        analysis.get("recommendations", {}),
     )
     if args.output:
         outfile = args.output
