@@ -19,6 +19,9 @@ Python utility to collect and analyze etcd performance metrics on OpenShift clus
 ### [S3 Integrity Check](./s3-integrity-check/)
 Python utility to detect corrupted objects in S3-compatible buckets where object metadata exists but underlying data is missing. Supports any S3 endpoint via direct connection parameters, with built-in presets for auto-discovering credentials from known platforms like NooBaa and Velero on OpenShift.
 
+### [RHOKP MCP Server](./rhokp-mcp-server/)
+MCP (Model Context Protocol) server that exposes a local Red Hat Offline Knowledge Portal (RHOKP) instance as AI-consumable tools. Enables LLM-powered assistants to search Red Hat knowledgebase solutions, articles, documentation, CVEs, and product lifecycle data offline via full-text, semantic, and hybrid search.
+
 ## Development Setup
 
 ### Prerequisites
