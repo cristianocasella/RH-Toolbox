@@ -279,23 +279,52 @@ async def do_get_page(path: str) -> str:
         return extract_text(resp.text)
 
 
+async def _match_products(products: List[Dict], query: str) -> List[Dict]:
+    """Filter products by exact name or substring match."""
+    lower_query = query.lower()
+
+    exact = [p for p in products if p.get("name", "").lower() == lower_query]
+    if exact:
+        return exact
+
+    return [
+        p
+        for p in products
+        if lower_query in p.get("name", "").lower()
+        or any(lower_query in fn.lower() for fn in p.get("former_names", []))
+    ]
+
+
 async def do_get_lifecycle(product_name: str) -> str:
-    """Query the RHOKP product lifecycle API."""
+    """Fetch all products from the lifecycle API and filter client-side.
+
+    The RHOKP lifecycle endpoint does not support server-side name
+    filtering (returns HTTP 500 when a query parameter is passed),
+    so we fetch the full product list and match locally.
+    """
     url = f"{RHOKP_BASE}/product-life-cycles/api/v1/products/"
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(url, params={"name": product_name})
-        if resp.status_code == 200:
-            try:
-                return json.dumps(resp.json(), indent=2)
-            except ValueError:
-                pass
-        resp2 = await client.get(url)
-        resp2.raise_for_status()
+        resp = await client.get(url)
+        resp.raise_for_status()
         try:
-            data = resp2.json()
+            data = resp.json()
         except ValueError:
-            return resp2.text[:5000]
-        return json.dumps(data, indent=2)[:10000]
+            return resp.text[:5000]
+
+    products = data.get("data", [])
+    matched = await _match_products(products, product_name)
+
+    if matched:
+        return json.dumps({"data": matched}, indent=2)
+
+    available = sorted({p.get("name", "") for p in products})
+    return json.dumps(
+        {
+            "error": f"No product matching '{product_name}'",
+            "available_products": available,
+        },
+        indent=2,
+    )
 
 
 async def handle_list_tools(_ctx, _params):  # pylint: disable=unused-argument
