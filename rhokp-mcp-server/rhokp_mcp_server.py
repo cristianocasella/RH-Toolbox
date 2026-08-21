@@ -21,6 +21,21 @@ from mcp.server import Server  # pylint: disable=import-error
 from mcp.server.stdio import stdio_server  # pylint: disable=import-error
 
 RHOKP_BASE = os.environ.get("RHOKP_BASE_URL", "http://localhost:8080")
+RHOKP_CONTAINER_NAME = os.environ.get("RHOKP_CONTAINER_NAME", "rhokp")
+RHOKP_CONTAINER_TAG = os.environ.get("RHOKP_CONTAINER_TAG", "1784655565")
+RHOKP_CONTAINER_IMAGE = os.environ.get(
+    "RHOKP_CONTAINER_IMAGE",
+    f"registry.redhat.io/offline-knowledge-portal/rhokp-rhel9:{RHOKP_CONTAINER_TAG}",
+)
+RHOKP_PODMAN_PATH = os.environ.get("RHOKP_PODMAN_PATH", "podman")
+RHOKP_CONTAINER_PORT = os.environ.get("RHOKP_CONTAINER_PORT", "8080")
+RHOKP_READY_TIMEOUT = int(os.environ.get("RHOKP_READY_TIMEOUT", "120"))
+RHOKP_READY_INTERVAL = int(os.environ.get("RHOKP_READY_INTERVAL", "3"))
+RHOKP_PIDS_LIMIT = os.environ.get("RHOKP_PIDS_LIMIT", "8192")
+RHOKP_KEY_FILE = os.environ.get(
+    "RHOKP_KEY_FILE",
+    os.path.expanduser("~/.rhokp_key.txt"),
+)
 
 TOOLS = [
     types.Tool(
@@ -179,6 +194,46 @@ TOOLS = [
             "required": ["product_name"],
         },
     ),
+    types.Tool(
+        name="container_status",
+        description=(
+            "Check the status of the RHOKP container. Returns whether "
+            "it exists, its current state (running/stopped/etc.), and "
+            "port mappings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.Tool(
+        name="container_start",
+        description=(
+            "Start the RHOKP container. If the container exists but is "
+            "stopped, it is started. If it does not exist, a new container "
+            "is created from the configured image and started."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.Tool(
+        name="container_stop",
+        description=("Stop the running RHOKP container gracefully."),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.Tool(
+        name="container_restart",
+        description=("Restart the RHOKP container. Equivalent to stop + start."),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 
@@ -327,9 +382,312 @@ async def do_get_lifecycle(product_name: str) -> str:
     )
 
 
+async def _run_podman(*args: str) -> tuple:
+    """Run a podman command and return (returncode, stdout, stderr)."""
+    proc = await asyncio.create_subprocess_exec(
+        RHOKP_PODMAN_PATH,
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
+
+
+async def _wait_for_ready() -> bool:
+    """Poll the Solr admin endpoint until it responds or timeout expires."""
+    url = f"{RHOKP_BASE}/solr/portal/admin/ping"
+    deadline = asyncio.get_event_loop().time() + RHOKP_READY_TIMEOUT
+    async with httpx.AsyncClient(timeout=5) as client:
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    return True
+            except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException):
+                pass
+            await asyncio.sleep(RHOKP_READY_INTERVAL)
+    return False
+
+
+async def do_container_status() -> str:
+    """Check the RHOKP container status."""
+    rc, stdout, stderr = await _run_podman(
+        "inspect",
+        "--format",
+        json.dumps(
+            {
+                "name": "{{.Name}}",
+                "state": "{{.State.Status}}",
+                "image": "{{.ImageName}}",
+                "created": "{{.Created}}",
+                "started": "{{.State.StartedAt}}",
+                "ports": "{{.HostConfig.PortBindings}}",
+            }
+        ),
+        RHOKP_CONTAINER_NAME,
+    )
+    if rc != 0:
+        if "no such container" in stderr.lower() or "no container" in stderr.lower():
+            return json.dumps(
+                {
+                    "exists": False,
+                    "container_name": RHOKP_CONTAINER_NAME,
+                    "message": (
+                        f"Container '{RHOKP_CONTAINER_NAME}' does not exist. "
+                        "Use 'container_start' to create and start it."
+                    ),
+                }
+            )
+        return json.dumps({"error": stderr or stdout})
+
+    try:
+        info = json.loads(stdout)
+        info["exists"] = True
+        info["container_name"] = RHOKP_CONTAINER_NAME
+        return json.dumps(info, indent=2)
+    except (ValueError, KeyError):
+        return json.dumps(
+            {
+                "exists": True,
+                "container_name": RHOKP_CONTAINER_NAME,
+                "raw": stdout,
+            }
+        )
+
+
+async def do_container_start() -> str:
+    """Start the RHOKP container, creating it if necessary."""
+    rc, stdout, stderr = await _run_podman(
+        "inspect", "--format", "{{.State.Status}}", RHOKP_CONTAINER_NAME
+    )
+
+    if rc == 0:
+        state = stdout.strip()
+        if state == "running":
+            return json.dumps(
+                {
+                    "action": "none",
+                    "message": (
+                        f"Container '{RHOKP_CONTAINER_NAME}' is already running."
+                    ),
+                }
+            )
+        rc, stdout, stderr = await _run_podman("start", RHOKP_CONTAINER_NAME)
+        if rc != 0:
+            return json.dumps({"error": f"Failed to start container: {stderr}"})
+        ready = await _wait_for_ready()
+        return json.dumps(
+            {
+                "action": "started",
+                "ready": ready,
+                "message": (
+                    f"Container '{RHOKP_CONTAINER_NAME}' started "
+                    f"(was {state})."
+                    + (
+                        ""
+                        if ready
+                        else f" Warning: Solr not ready after {RHOKP_READY_TIMEOUT}s."
+                    )
+                ),
+            }
+        )
+
+    port_mapping = f"{RHOKP_CONTAINER_PORT}:8080"
+    tls_mapping = f"{int(RHOKP_CONTAINER_PORT) + 363}:8443"
+    run_args = [
+        "run",
+        "-d",
+        "--name",
+        RHOKP_CONTAINER_NAME,
+        "-p",
+        port_mapping,
+        "-p",
+        tls_mapping,
+        "--pids-limit",
+        RHOKP_PIDS_LIMIT,
+        "--init",
+    ]
+    if os.path.isfile(RHOKP_KEY_FILE):
+        with open(RHOKP_KEY_FILE, encoding="utf-8") as fh:
+            access_key = fh.read().strip()
+        if access_key:
+            run_args.extend(["-e", f"ACCESS_KEY={access_key}"])
+    run_args.append(RHOKP_CONTAINER_IMAGE)
+    rc, stdout, stderr = await _run_podman(*run_args)
+    if rc != 0:
+        return json.dumps({"error": f"Failed to create container: {stderr}"})
+    ready = await _wait_for_ready()
+    return json.dumps(
+        {
+            "action": "created",
+            "container_id": stdout[:12],
+            "ready": ready,
+            "message": (
+                f"Container '{RHOKP_CONTAINER_NAME}' created from "
+                f"'{RHOKP_CONTAINER_IMAGE}' and started on port "
+                f"{RHOKP_CONTAINER_PORT}."
+                + (
+                    ""
+                    if ready
+                    else f" Warning: Solr not ready after {RHOKP_READY_TIMEOUT}s."
+                )
+            ),
+        }
+    )
+
+
+async def do_container_stop() -> str:
+    """Stop the RHOKP container."""
+    rc, stdout, stderr = await _run_podman(
+        "inspect", "--format", "{{.State.Status}}", RHOKP_CONTAINER_NAME
+    )
+
+    if rc != 0:
+        return json.dumps(
+            {"error": f"Container '{RHOKP_CONTAINER_NAME}' does not exist."}
+        )
+
+    state = stdout.strip()
+    if state != "running":
+        return json.dumps(
+            {
+                "action": "none",
+                "message": (
+                    f"Container '{RHOKP_CONTAINER_NAME}' is not running "
+                    f"(state: {state})."
+                ),
+            }
+        )
+
+    rc, stdout, stderr = await _run_podman("stop", RHOKP_CONTAINER_NAME)
+    if rc != 0:
+        return json.dumps({"error": f"Failed to stop container: {stderr}"})
+    return json.dumps(
+        {
+            "action": "stopped",
+            "message": f"Container '{RHOKP_CONTAINER_NAME}' stopped.",
+        }
+    )
+
+
+async def do_container_restart() -> str:
+    """Restart the RHOKP container."""
+    rc, _, stderr = await _run_podman(
+        "inspect", "--format", "{{.State.Status}}", RHOKP_CONTAINER_NAME
+    )
+
+    if rc != 0:
+        return json.dumps(
+            {
+                "error": (
+                    f"Container '{RHOKP_CONTAINER_NAME}' does not exist. "
+                    "Use 'container_start' to create it first."
+                ),
+            }
+        )
+
+    rc, _, stderr = await _run_podman("restart", RHOKP_CONTAINER_NAME)
+    if rc != 0:
+        return json.dumps({"error": f"Failed to restart container: {stderr}"})
+    ready = await _wait_for_ready()
+    return json.dumps(
+        {
+            "action": "restarted",
+            "ready": ready,
+            "message": (
+                f"Container '{RHOKP_CONTAINER_NAME}' restarted."
+                + (
+                    ""
+                    if ready
+                    else f" Warning: Solr not ready after {RHOKP_READY_TIMEOUT}s."
+                )
+            ),
+        }
+    )
+
+
 async def handle_list_tools(_ctx, _params):  # pylint: disable=unused-argument
     """Return the list of available MCP tools."""
     return types.ListToolsResult(tools=TOOLS)
+
+
+async def _do_search(args: Dict) -> str:
+    """Handle keyword search."""
+    extra = {}
+    if args.get("document_kind"):
+        extra["fq"] = f"documentKind:{args['document_kind']}"
+    results = await do_solr_search(
+        "portal",
+        "select",
+        args["query"],
+        args.get("rows", 5),
+        extra,
+    )
+    return json.dumps(results, indent=2)
+
+
+async def _do_semantic(args: Dict) -> str:
+    """Handle semantic search."""
+    extra = {"df": "chunk"}
+    if args.get("product"):
+        extra["fq"] = f"product:{args['product']}"
+    results = await do_solr_search(
+        "portal-rag",
+        "semantic-search",
+        args["query"],
+        args.get("rows", 5),
+        extra,
+    )
+    return json.dumps(results, indent=2)
+
+
+async def _do_hybrid(args: Dict) -> str:
+    """Handle hybrid search."""
+    extra = {}
+    if args.get("product"):
+        extra["fq"] = f"product:{args['product']}"
+    results = await do_solr_search(
+        "portal-rag",
+        "hybrid-search",
+        args["query"],
+        args.get("rows", 5),
+        extra,
+    )
+    return json.dumps(results, indent=2)
+
+
+async def _do_solution(args: Dict) -> str:
+    """Handle get_solution."""
+    sid = re.sub(r"[^0-9]", "", args["solution_id"])
+    text = await do_get_page(f"solutions/{sid}/index.html")
+    return text or f"Solution {sid} not found in this RHOKP instance."
+
+
+async def _do_article(args: Dict) -> str:
+    """Handle get_article."""
+    aid = re.sub(r"[^0-9]", "", args["article_id"])
+    text = await do_get_page(f"articles/{aid}/index.html")
+    return text or f"Article {aid} not found in this RHOKP instance."
+
+
+async def _do_lifecycle(args: Dict) -> str:
+    """Handle get_product_lifecycle."""
+    return await do_get_lifecycle(args["product_name"])
+
+
+_TOOL_HANDLERS = {
+    "search": _do_search,
+    "semantic_search": _do_semantic,
+    "hybrid_search": _do_hybrid,
+    "get_solution": _do_solution,
+    "get_article": _do_article,
+    "get_product_lifecycle": _do_lifecycle,
+    "container_status": lambda _args: do_container_status(),
+    "container_start": lambda _args: do_container_start(),
+    "container_stop": lambda _args: do_container_stop(),
+    "container_restart": lambda _args: do_container_restart(),
+}
 
 
 async def handle_call_tool(
@@ -340,68 +698,16 @@ async def handle_call_tool(
     args = params.arguments or {}
 
     try:
-        if name == "search":
-            extra = {}
-            if args.get("document_kind"):
-                extra["fq"] = f"documentKind:{args['document_kind']}"
-            results = await do_solr_search(
-                "portal",
-                "select",
-                args["query"],
-                args.get("rows", 5),
-                extra,
-            )
-            text = json.dumps(results, indent=2)
-
-        elif name == "semantic_search":
-            extra = {"df": "chunk"}
-            if args.get("product"):
-                extra["fq"] = f"product:{args['product']}"
-            results = await do_solr_search(
-                "portal-rag",
-                "semantic-search",
-                args["query"],
-                args.get("rows", 5),
-                extra,
-            )
-            text = json.dumps(results, indent=2)
-
-        elif name == "hybrid_search":
-            extra = {}
-            if args.get("product"):
-                extra["fq"] = f"product:{args['product']}"
-            results = await do_solr_search(
-                "portal-rag",
-                "hybrid-search",
-                args["query"],
-                args.get("rows", 5),
-                extra,
-            )
-            text = json.dumps(results, indent=2)
-
-        elif name == "get_solution":
-            sid = re.sub(r"[^0-9]", "", args["solution_id"])
-            text = await do_get_page(f"solutions/{sid}/index.html")
-            if not text:
-                text = f"Solution {sid} not found in this RHOKP instance."
-
-        elif name == "get_article":
-            aid = re.sub(r"[^0-9]", "", args["article_id"])
-            text = await do_get_page(f"articles/{aid}/index.html")
-            if not text:
-                text = f"Article {aid} not found in this RHOKP instance."
-
-        elif name == "get_product_lifecycle":
-            text = await do_get_lifecycle(args["product_name"])
-
-        else:
+        handler = _TOOL_HANDLERS.get(name)
+        if not handler:
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=f"Unknown tool: {name}")],
                 isError=True,
             )
+        text = await handler(args)
 
     except httpx.HTTPStatusError as exc:
-        text = f"HTTP error {exc.response.status_code}: " f"{exc.response.text[:500]}"
+        text = f"HTTP error {exc.response.status_code}: {exc.response.text[:500]}"
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=text)],
             isError=True,
@@ -409,7 +715,9 @@ async def handle_call_tool(
     except httpx.ConnectError:
         text = (
             f"Cannot connect to RHOKP at {RHOKP_BASE}. "
-            "Ensure the RHOKP container is running."
+            "Use the 'container_status' tool to check whether the "
+            "RHOKP container is running, or 'container_start' to "
+            "launch it."
         )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=text)],
@@ -429,7 +737,10 @@ server = Server(
         "Solr search. Use 'hybrid_search' as the default search tool — "
         "it combines keyword and semantic search for best results. Use "
         "'search' for exact IDs or error messages. Use 'get_solution' or "
-        "'get_article' when you have a specific document ID."
+        "'get_article' when you have a specific document ID. "
+        "Container management: use 'container_status' to check the RHOKP "
+        "backend, 'container_start' to launch it, 'container_stop' to "
+        "shut it down, and 'container_restart' to restart it."
     ),
     on_list_tools=handle_list_tools,
     on_call_tool=handle_call_tool,
