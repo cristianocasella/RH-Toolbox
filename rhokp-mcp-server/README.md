@@ -1,6 +1,6 @@
 # RHOKP MCP Server
 
-Model Context Protocol (MCP) server that exposes a local [Red Hat Offline Knowledge Portal (RHOKP)](https://github.com/redhatofficial/rhokp) instance as AI-consumable tools. Enables LLM-powered assistants to search Red Hat knowledgebase solutions, articles, documentation, CVEs, and product lifecycle data — all without internet access.
+Model Context Protocol (MCP) server that exposes a local [Red Hat Offline Knowledge Portal (RHOKP)](https://docs.redhat.com/en/documentation/red_hat_offline_knowledge_portal/1/install-deploy_the_red_hat_offline_knowledge_portal_using_podman_desktop) instance as AI-consumable tools. Enables LLM-powered assistants to search Red Hat knowledgebase solutions, articles, documentation, CVEs, and product lifecycle data — all without internet access.
 
 ## Overview
 
@@ -16,11 +16,15 @@ RHOKP bundles Red Hat's public knowledge base into a self-contained, offline-cap
 | `get_solution` | Retrieve a specific solution by numeric ID |
 | `get_article` | Retrieve a specific article by numeric ID |
 | `get_product_lifecycle` | Get lifecycle/support dates for a Red Hat product |
+| `container_status` | Check if the RHOKP backend container is running |
+| `container_start` | Start the RHOKP container (creates it if needed) |
+| `container_stop` | Stop the RHOKP container gracefully |
+| `container_restart` | Restart the RHOKP container |
 
 ## Prerequisites
 
 - **Python 3.9+**
-- **RHOKP instance** — a running RHOKP container (see [RHOKP project](https://github.com/redhatofficial/rhokp) for setup)
+- **RHOKP instance** — a running RHOKP container (see the [official install guide](https://docs.redhat.com/en/documentation/red_hat_offline_knowledge_portal/1/install-deploy_the_red_hat_offline_knowledge_portal_using_podman_desktop) for setup and license instructions)
 - **pip packages** — `httpx`, `mcp` (see `requirements.txt`)
 
 ## Quick Start
@@ -32,8 +36,12 @@ RHOKP bundles Red Hat's public knowledge base into a self-contained, offline-cap
 
 2. **Start RHOKP** (if not already running):
    ```bash
-   podman run -d -p 8080:8080 rhokp:latest
+   podman run -d --name rhokp \
+     -p 8080:8080 -p 8443:8443 \
+     --pids-limit 8192 --init \
+     registry.redhat.io/offline-knowledge-portal/rhokp-rhel9:1784655565
    ```
+   If your RHOKP build requires an access key, either pass it via `-e ACCESS_KEY=<key>` or write it to `~/.rhokp_key.txt` (the server reads it automatically on `container_start`).
 
 3. **Run the MCP server** (standalone test):
    ```bash
@@ -49,6 +57,15 @@ RHOKP bundles Red Hat's public knowledge base into a self-contained, offline-cap
 | Variable | Default | Description |
 |---|---|---|
 | `RHOKP_BASE_URL` | `http://localhost:8080` | Base URL of the RHOKP instance |
+| `RHOKP_PODMAN_PATH` | `podman` | Path to the podman binary |
+| `RHOKP_CONTAINER_NAME` | `rhokp` | Name for the RHOKP container |
+| `RHOKP_CONTAINER_TAG` | `1784655565` | Image tag (build ID) to use |
+| `RHOKP_CONTAINER_IMAGE` | `registry.redhat.io/offline-knowledge-portal/rhokp-rhel9:<tag>` | Container image (constructed from tag by default) |
+| `RHOKP_CONTAINER_PORT` | `8080` | Host port to bind (TLS port is automatically mapped to port+363, e.g. 8443) |
+| `RHOKP_READY_TIMEOUT` | `120` | Seconds to wait for Solr readiness after starting the container |
+| `RHOKP_READY_INTERVAL` | `3` | Polling interval in seconds for the readiness check |
+| `RHOKP_PIDS_LIMIT` | `8192` | Container pids limit (RHOKP runs multiple services internally) |
+| `RHOKP_KEY_FILE` | `~/.rhokp_key.txt` | Path to a file containing the RHOKP access key (if required by your RHOKP build) |
 
 ### Claude Code
 
@@ -61,7 +78,8 @@ Add the server to your Claude Code MCP configuration (`.claude/settings.json` or
       "command": "python3",
       "args": ["/path/to/rhokp_mcp_server.py"],
       "env": {
-        "RHOKP_BASE_URL": "http://localhost:8080"
+        "RHOKP_BASE_URL": "http://localhost:8080",
+        "RHOKP_PODMAN_PATH": "/opt/podman/bin/podman"
       }
     }
   }
@@ -79,7 +97,8 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
       "command": "python3",
       "args": ["/path/to/rhokp_mcp_server.py"],
       "env": {
-        "RHOKP_BASE_URL": "http://localhost:8080"
+        "RHOKP_BASE_URL": "http://localhost:8080",
+        "RHOKP_PODMAN_PATH": "podman"
       }
     }
   }
@@ -107,6 +126,22 @@ Find articles about configuring etcd encryption on OpenShift
 - **`semantic_search`** — Use for broad natural language questions (e.g. "how do I resize a persistent volume"). May surface relevant content that keyword search misses.
 - **`get_solution` / `get_article`** — Use when you already know the document ID and want the full text.
 - **`get_product_lifecycle`** — Use for support date questions (e.g. "when does RHEL 8 go end-of-life?").
+
+### Container Management
+
+The server can manage the RHOKP backend container directly. If a search tool fails because the backend is unreachable, the error message will suggest using the container tools.
+
+```
+Check if the RHOKP container is running
+
+Start the RHOKP container
+
+Stop the RHOKP backend
+
+Restart the RHOKP container
+```
+
+The container tools use `podman` to manage the container. Set `RHOKP_PODMAN_PATH` if podman is not on your PATH. When `container_start` is called and no container exists, it creates one from the configured image with the configured port mapping.
 
 ### Filtering Results
 

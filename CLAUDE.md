@@ -14,16 +14,23 @@ RH-Toolbox/
 ├── LICENSE                      # AGPL-3.0 license
 ├── .pylintrc                    # Pylint configuration
 ├── requirements-dev.txt         # Development dependencies
-├── oc-mirror-wrapper/           # Tool 1: oc-mirror automation
-│   ├── README.md               # Tool-specific documentation
-│   ├── oc_mirror_sync.py       # Main script
-│   └── oc_mirror_config.yaml.example  # Configuration example
-├── imageset-check-update/       # Tool 2: ImageSet update checker
-│   ├── README.md               # Tool-specific documentation
-│   └── check_updates.py        # Main script
-└── [future-tool]/               # Future tools follow same pattern
+├── oc-mirror-wrapper/           # oc-mirror automation
+│   ├── README.md
+│   ├── oc_mirror_sync.py
+│   └── oc_mirror_config.yaml.example
+├── imageset-check-update/       # ImageSet update checker
+│   ├── README.md
+│   └── check_updates.py
+├── etcd-performance-check/      # etcd performance metrics collector
+│   ├── README.md
+│   └── etcd_performance_check.py
+├── s3-integrity-check/          # S3 corrupted-object detector
+│   ├── README.md
+│   └── s3_integrity_check.py
+└── rhokp-mcp-server/            # MCP server for RHOKP offline KB
     ├── README.md
-    └── script.py
+    ├── requirements.txt
+    └── rhokp_mcp_server.py
 ```
 
 ## Whitelabeling Guidelines
