@@ -22,7 +22,7 @@ from mcp.server.stdio import stdio_server  # pylint: disable=import-error
 
 RHOKP_BASE = os.environ.get("RHOKP_BASE_URL", "http://localhost:8080")
 RHOKP_CONTAINER_NAME = os.environ.get("RHOKP_CONTAINER_NAME", "rhokp")
-RHOKP_CONTAINER_TAG = os.environ.get("RHOKP_CONTAINER_TAG", "1784655565")
+RHOKP_CONTAINER_TAG = os.environ.get("RHOKP_CONTAINER_TAG", "latest")
 RHOKP_CONTAINER_IMAGE = os.environ.get(
     "RHOKP_CONTAINER_IMAGE",
     f"registry.redhat.io/offline-knowledge-portal/rhokp-rhel9:{RHOKP_CONTAINER_TAG}",
