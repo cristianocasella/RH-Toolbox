@@ -152,6 +152,18 @@ When `skopeo_fallback: true` is enabled, the script automatically:
 
 This is useful for handling manifest format issues that oc-mirror cannot resolve.
 
+### Cache Directory (v2 only)
+Set `cache_dir` to control where oc-mirror stores its internal cache (image layer blobs and metadata). By default oc-mirror uses `$HOME`. Use this when:
+- Home directory space is limited
+- You want the cache on a faster or dedicated disk
+
+```yaml
+options:
+  cache_dir: "/mnt/fast-disk/oc-mirror-cache"
+```
+
+> **Note**: `cache_dir` overrides the `OC_MIRROR_CACHE` environment variable. Setting both causes an error. The same path must be used consistently across all stages (Stage 0 and Stage 1+).
+
 ### Working Directory Management
 The script automatically backs up and restores the working directory between registry mirrors to prevent oc-mirror v2 metadata corruption that can cause "no tar archives found" errors. Each registry receives a clean copy of the working directory metadata.
 
