@@ -85,6 +85,7 @@ options:
   parallel_images: 10        # Concurrent image downloads (adjust for network)
   parallel_layers: 10        # Concurrent layer downloads
   retry_times: 5             # Number of retries for failed transfers
+  cache_dir: null            # v2 only: cache directory (default: $HOME). Overrides OC_MIRROR_CACHE env var
   remove_signatures: false   # Remove signatures (v2 workaround for manifest issues)
   ignore_release_signature: false  # Ignore release signatures (v2)
   skopeo_fallback: false     # Enable skopeo retry for failed images

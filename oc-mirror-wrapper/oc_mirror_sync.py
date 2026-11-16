@@ -117,6 +117,11 @@ class OCMirrorConfig:
         return self.config.get("options", {}).get("retry_times", 5)
 
     @property
+    def cache_dir(self) -> Optional[str]:
+        """Get cache directory path (v2 only, overrides OC_MIRROR_CACHE env var)."""
+        return self.config.get("options", {}).get("cache_dir")
+
+    @property
     def remove_signatures(self) -> bool:
         """Get remove signatures setting (v2 only - workaround for manifest issues)."""
         return self.config.get("options", {}).get("remove_signatures", False)
@@ -209,6 +214,10 @@ class OCMirrorExecutor:
             cmd.extend(["--parallel-images", str(self.config.parallel_images)])
             cmd.extend(["--parallel-layers", str(self.config.parallel_layers)])
             cmd.extend(["--retry-times", str(self.config.retry_times)])
+
+            # Optional cache directory (defaults to $HOME when omitted)
+            if self.config.cache_dir:
+                cmd.extend(["--cache-dir", self.config.cache_dir])
 
             # V2 workaround flags for manifest issues
             if self.config.remove_signatures:

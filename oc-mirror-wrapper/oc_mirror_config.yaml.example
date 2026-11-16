@@ -32,6 +32,7 @@ registries:
 #   parallel_images: 10      # Default: 10 (adjust for network speed)
 #   parallel_layers: 10      # Default: 10 (adjust for network speed)
 #   retry_times: 5           # Default: 5 (increase for unstable networks)
+#   cache_dir: null          # v2 only: cache directory (default: $HOME). Overrides OC_MIRROR_CACHE env var
 
 # Logging (defaults: level=INFO, log_file=null)
 # logging:
